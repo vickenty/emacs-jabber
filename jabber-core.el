@@ -643,8 +643,7 @@ With double prefix argument, specify more connection details."
 	((eq (jabber-xml-node-name stanza) 'features)
 	 ;; Record stream features, discarding earlier data:
 	 (setq state-data (plist-put state-data :stream-features stanza))
-	 (if (and (jabber-xml-get-children stanza 'bind)
-		  (jabber-xml-get-children stanza 'session))
+	 (if (jabber-xml-get-children stanza 'bind)
 	     (labels
 		 ((handle-bind 
 		   (jc xml-data success)
@@ -661,7 +660,7 @@ With double prefix argument, specify more connection details."
 				 #'handle-bind t
 				 #'handle-bind nil))
 	       (list :bind state-data))
-	   (message "Server doesn't permit resource binding and session establishing")
+	   (message "Server doesn't permit resource binding")
 	   (list nil state-data)))
 	(t
 	 (or
@@ -677,18 +676,23 @@ With double prefix argument, specify more connection details."
        (plist-put state-data :server (jabber-jid-server jid))
        (plist-put state-data :resource (jabber-jid-resource jid)))
 
-     ;; Been there, done that.  Time to establish a session.
-     (labels 
-	 ((handle-session
-	   (jc xml-data success)
-	   (fsm-send jc (list
-			 (if success :session-success :session-failure)
-			 xml-data))))
-       (jabber-send-iq fsm nil "set"
-		       '(session ((xmlns . "urn:ietf:params:xml:ns:xmpp-session")))
-		       #'handle-session t
-		       #'handle-session nil)
-       (list :bind state-data)))
+     ;; If the server follows the older RFCs 3920 and 3921, it may
+     ;; offer session initiation here.  If it follows RFCs 6120 and
+     ;; 6121, it might not offer it, and we should just skip it.
+     (if (jabber-xml-get-children (plist-get state-data :stream-features) 'session)
+	 (labels
+	     ((handle-session
+	       (jc xml-data success)
+	       (fsm-send jc (list
+			     (if success :session-success :session-failure)
+			     xml-data))))
+	   (jabber-send-iq fsm nil "set"
+			   '(session ((xmlns . "urn:ietf:params:xml:ns:xmpp-session")))
+			   #'handle-session t
+			   #'handle-session nil)
+	   (list :bind state-data))
+       ;; Session establishment not offered - assume not necessary.
+       (list :session-established state-data)))
 
     (:session-success
      ;; We have a session
